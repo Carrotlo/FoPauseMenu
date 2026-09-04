@@ -1,0 +1,59 @@
+# Need help or want support? Join the Discord: https://discord.gg/kEF77QCfu7
+
+# Controls whether FoPauseMenu registers and responds to the native pause menu button.
+# Changing this setting needs a full server restart before the ESC-menu button itself changes.
+pause-menu:
+  enabled: true
+
+  # Native dialog layout. Button width is used as fallback when an action has no width.
+  columns: 2
+  button-width: 98
+
+# Configurable actions shown in the native pause menu.
+# Visible button text, tooltip, and width are stored with each action below.
+# Supported types: player-command, console-command, message, none
+# Player commands run as the player. Console commands run as console.
+# Commands may include a leading slash and support %player% and %uuid%.
+# Messages support %player% and %uuid% where a player context exists.
+# Labels/tooltips support style tokens, MiniMessage tags, &a, #RRGGBB, &#RRGGBB, icons like :diamond:, and heads like :head/Notch:.
+# Lower order values show first. Higher values show later.
+actions:
+  spawn:
+    enabled: true
+    type: player-command
+    command: "/spawn"
+    label: ":compass: Spawn"
+    tooltip: "{white}Run /spawn."
+    width: 98
+    order: 1
+    permission: ""
+
+  menu:
+    enabled: true
+    type: player-command
+    command: "/menu"
+    label: ":book: Menu"
+    tooltip: "{white}Open the server menu."
+    width: 98
+    order: 2
+    permission: ""
+
+  discord:
+    enabled: true
+    type: message
+    message: "{prefix}{muted}Discord: {theme}https://discord.gg/kEF77QCfu7"
+    label: ":paper: Discord"
+    tooltip: "{white}Show the Discord invite."
+    width: 98
+    order: 3
+    permission: ""
+
+  store:
+    enabled: false
+    type: console-command
+    command: "/shop open %player%"
+    label: ":emerald: Store"
+    tooltip: "{white}Open the server store."
+    width: 98
+    order: 4
+    permission: "fopausemenu.button.store"

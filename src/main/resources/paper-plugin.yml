@@ -1,0 +1,15 @@
+name: FoPauseMenu
+description: Configurable native pause menu actions for modern Paper servers.
+version: '${version}'
+
+main: me.foesio.foPauseMenu.FoPauseMenu
+bootstrapper: me.foesio.foPauseMenu.FoPauseMenuBootstrap
+api-version: '1.21'
+load: POSTWORLD
+
+authors: [ Carrotio ]
+
+permissions:
+  fopausemenu.admin:
+    description: Allows FoPauseMenu admin subcommands and editor.
+    default: op

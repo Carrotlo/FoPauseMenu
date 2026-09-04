@@ -1,0 +1,18 @@
+# Visible text for the native ESC-menu dialog.
+# Restart server and let players rejoin after editing this file; Minecraft syncs dialog registry data during login.
+# Valid placeholders: {theme}, {muted}, {white}, {good}, {bad}, %player%, %uuid%
+# Text supports style tokens, MiniMessage tags, &a-style legacy colors, #RRGGBB, and &#RRGGBB.
+# Shadow tags are ignored.
+
+# Text shown on the button this plugin adds to Minecraft's ESC menu.
+external-title: "FoPauseMenu"
+
+# Title shown after clicking that ESC-menu button.
+title: "{theme}FoPauseMenu"
+body:
+  - "{muted}Choose where you want to go."
+
+exit-button:
+  label: "{bad}Close"
+  tooltip: "{white}Return to game."
+  width: 98
