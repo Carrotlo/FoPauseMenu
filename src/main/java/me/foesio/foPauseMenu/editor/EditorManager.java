@@ -165,7 +165,8 @@ public final class EditorManager implements Listener {
                 "{muted}Needs restart and player rejoin."
         ), Map.of("{value}", text.literal(action.label())));
         put(inventory, ACTION_VALUE_SLOT, Material.OAK_SIGN, "{theme}Action Value", List.of(
-                "{white}Edit command or message."
+                "{white}Edit command or message.",
+                "{muted}None allows another plugin to handle this button."
         ), Map.of("{value}", text.literal(action.value())));
         put(inventory, ACTION_ORDER_SLOT, Material.HOPPER, "{theme}Order: {white}{value}", List.of(
                 "{white}Lower numbers show first.",

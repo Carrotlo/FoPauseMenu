@@ -1,5 +1,16 @@
 package me.foesio.foPauseMenu;
 
+import io.papermc.paper.dialog.Dialog;
+import io.papermc.paper.registry.RegistryAccess;
+import io.papermc.paper.registry.RegistryKey;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Locale;
+import java.util.logging.Level;
+import me.foesio.foPauseMenu.api.CustomActionHandler;
+import me.foesio.foPauseMenu.api.CustomActionMode;
+import me.foesio.foPauseMenu.api.FoPauseMenuApi;
 import me.foesio.foPauseMenu.config.ConfigManager;
 import me.foesio.foPauseMenu.editor.EditorManager;
 import me.foesio.foPauseMenu.message.ComponentTextService;
@@ -24,10 +35,18 @@ import io.papermc.paper.command.brigadier.BasicCommand;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import java.util.Collection;
 import java.util.List;
+import net.kyori.adventure.audience.Audience;
+import org.bukkit.Bukkit;
+import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.server.PluginDisableEvent;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.ServicePriority;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public final class FoPauseMenu extends JavaPlugin {
+public final class FoPauseMenu extends JavaPlugin implements FoPauseMenuApi, Listener {
+    private final Map<String, CustomRegistration> customActions = new HashMap<>();
     private ConfigManager configManager;
     private FoCoreContext core;
     private FoMessageService coreMessages;
@@ -65,12 +84,16 @@ public final class FoPauseMenu extends JavaPlugin {
 
         registerCommands();
         registerListener(editorManager);
+        registerListener(this);
+        getServer().getServicesManager().register(FoPauseMenuApi.class, this, this, ServicePriority.Normal);
 
         coreMessages.info("console.startup", "{prefix}FoPauseMenu enabled.");
     }
 
     @Override
     public void onDisable() {
+        getServer().getServicesManager().unregister(FoPauseMenuApi.class, this);
+        customActions.clear();
         if (coreMessages != null) {
             coreMessages.info("console.shutdown", "{prefix}FoPauseMenu disabled.");
         }
@@ -78,6 +101,94 @@ public final class FoPauseMenu extends JavaPlugin {
             core.close();
             core = null;
         }
+    }
+
+    @Override
+    public OpenResult open(Player player) {
+        requireServerThread();
+        Objects.requireNonNull(player, "player");
+        if (!player.isOnline()) {
+            return OpenResult.PLAYER_OFFLINE;
+        }
+        if (!isEnabled()) {
+            return OpenResult.UNAVAILABLE;
+        }
+        Dialog dialog = RegistryAccess.registryAccess().getRegistry(RegistryKey.DIALOG)
+                .get(FoPauseMenuBootstrap.pauseDialogKey());
+        if (dialog == null) {
+            return OpenResult.UNAVAILABLE;
+        }
+        ((Audience) player).showDialog(dialog);
+        return OpenResult.OPENED;
+    }
+
+    @Override
+    public boolean registerCustomAction(String actionId, Plugin owner, CustomActionHandler handler, CustomActionMode mode) {
+        requireServerThread();
+        Objects.requireNonNull(owner, "owner");
+        Objects.requireNonNull(handler, "handler");
+        Objects.requireNonNull(mode, "mode");
+        String id = validActionId(actionId);
+        if (id == null || !isEnabled() || !owner.isEnabled()
+                || !FoPauseMenuBootstrap.activeActionIds().contains(id)) {
+            return false;
+        }
+        CustomRegistration old = customActions.get(id);
+        if (old != null && old.owner() != owner) {
+            return false;
+        }
+        customActions.put(id, new CustomRegistration(owner, handler, mode));
+        return true;
+    }
+
+    @Override
+    public boolean unregisterCustomAction(String actionId, Plugin owner) {
+        requireServerThread();
+        Objects.requireNonNull(owner, "owner");
+        String id = validActionId(actionId);
+        if (id == null) {
+            return false;
+        }
+        CustomRegistration current = customActions.get(id);
+        return current != null && current.owner() == owner && customActions.remove(id, current);
+    }
+
+    CustomRegistration customActionRegistration(String actionId) {
+        CustomRegistration registration = customActions.get(actionId);
+        return registration != null && registration.owner().isEnabled() ? registration : null;
+    }
+
+    void runCustomAction(String actionId, Player player, CustomActionHandler handler) {
+        try {
+            handler.execute(player);
+        } catch (RuntimeException ex) {
+            String rendered = coreMessages.render("console.custom-action-failed",
+                    "{prefix}Custom action {action} failed: {reason}",
+                    Map.of("{action}", actionId, "{reason}", String.valueOf(ex.getMessage())));
+            getLogger().log(Level.WARNING, FoText.plain(rendered), ex);
+        }
+    }
+
+    @EventHandler
+    public void onPluginDisable(PluginDisableEvent event) {
+        customActions.entrySet().removeIf(entry -> entry.getValue().owner() == event.getPlugin());
+    }
+
+    private static String validActionId(String actionId) {
+        if (actionId == null) {
+            return null;
+        }
+        String id = actionId.trim().toLowerCase(Locale.ROOT);
+        return id.matches("[a-z0-9_-]{1,128}") ? id : null;
+    }
+
+    private static void requireServerThread() {
+        if (!Bukkit.isPrimaryThread()) {
+            throw new IllegalStateException("FoPauseMenu API must be called on the server thread");
+        }
+    }
+
+    record CustomRegistration(Plugin owner, CustomActionHandler handler, CustomActionMode mode) {
     }
 
     public boolean reloadPlugin() {

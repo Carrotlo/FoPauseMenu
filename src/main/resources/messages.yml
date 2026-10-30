@@ -38,3 +38,4 @@ console:
   registry-failed: "{prefix}Could not register native pause menu dialog: {reason}"
   reload-failed: "{prefix}Reload failed: {reason}"
   file-save-failed: "{prefix}Could not save {file}: {reason}"
+  custom-action-failed: "{prefix}Custom action {action} failed: {reason}"

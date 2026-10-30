@@ -12,6 +12,9 @@ pause-menu:
 # Configurable actions shown in the native pause menu.
 # Visible button text, tooltip, and width are stored with each action below.
 # Supported types: player-command, console-command, message, none
+# Another plugin can register a Java handler for any enabled button by action ID.
+# By default the handler runs after this configured action; it may also replace
+# it explicitly. Use type: none for a button handled only by another plugin.
 # Player commands run as the player. Console commands run as console.
 # Commands may include a leading slash and support %player% and %uuid%.
 # Messages support %player% and %uuid% where a player context exists.

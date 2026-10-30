@@ -22,9 +22,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import me.foesio.foPauseMenu.api.CustomActionMode;
+import me.foesio.foPauseMenu.api.PauseMenuActionType;
+import me.foesio.foPauseMenu.api.event.PauseMenuActionPreExecuteEvent;
 import me.foesio.foPauseMenu.util.TextFormatUtil;
 import me.foesio.foPauseMenu.util.CommandDispatchUtil;
 import me.foesio.core.dialog.DialogIcons;
@@ -40,6 +45,7 @@ import org.bukkit.plugin.Plugin;
 
 public final class FoPauseMenuBootstrap implements PluginBootstrap {
     private static final String NAMESPACE = "fopausemenu";
+    private static volatile Set<String> activeActionIds = Set.of();
     private static final io.papermc.paper.registry.TypedKey<Dialog> PAUSE_DIALOG =
             DialogKeys.create(Key.key(NAMESPACE, "pause_menu"));
     private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
@@ -52,6 +58,7 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
     @Override
     public void bootstrap(BootstrapContext context) {
         BootstrapConfig config = BootstrapConfig.load(context.getDataDirectory());
+        activeActionIds = config.enabled() ? config.actionIds() : Set.of();
         if (!config.enabled()) {
             context.getLogger().info(config.component(config.consoleRegistryDisabled()));
             return;
@@ -75,6 +82,14 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
                 event.registrar().addToTag(DialogTagKeys.PAUSE_SCREEN_ADDITIONS, List.of(PAUSE_DIALOG))
         );
         context.getLogger().info(config.component(config.consoleRegistryRegistered()));
+    }
+
+    static io.papermc.paper.registry.TypedKey<Dialog> pauseDialogKey() {
+        return PAUSE_DIALOG;
+    }
+
+    static Set<String> activeActionIds() {
+        return activeActionIds;
     }
 
     private static Component component(String raw, Tokens tokens) {
@@ -132,6 +147,9 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
     private record BootstrapButton(int order, ActionButton button) {
     }
 
+    private record LoadedButtons(List<ActionButton> buttons, Set<String> actionIds) {
+    }
+
     private enum BootstrapActionType {
         PLAYER_COMMAND("player-command"),
         CONSOLE_COMMAND("console-command"),
@@ -169,7 +187,8 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
             Tokens tokens,
             String consoleRegistryDisabled,
             String consoleRegistryRegistered,
-            String actionPermission
+            String actionPermission,
+            Set<String> actionIds
     ) {
         private static BootstrapConfig load(Path dataDirectory) {
             File dataFolder = dataDirectory.toFile();
@@ -182,12 +201,15 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
             int columns = clamp(config.getInt("pause-menu.columns", 2), 1, 4);
             int defaultWidth = clamp(config.getInt("pause-menu.button-width", 98), 50, 300);
             String actionPermission = messages.getString("messages.action-permission", "{prefix}{bad}You cannot use this action.");
-            List<ActionButton> buttons = loadButtons(config, dialog, tokens, actionPermission, defaultWidth);
+            LoadedButtons loadedButtons = loadButtons(config, dialog, tokens, actionPermission, defaultWidth);
+            List<ActionButton> buttons = loadedButtons.buttons();
+            Set<String> actionIds = loadedButtons.actionIds();
             if (buttons.isEmpty()) {
                 BootstrapAction fallback = new BootstrapAction("menu", BootstrapActionType.PLAYER_COMMAND,
                         "menu", "", "");
                 buttons = List.of(actionButton(fallback, ":book: Menu", "{white}Open fallback menu.",
                         defaultWidth, tokens, actionPermission));
+                actionIds = Set.of("menu");
             }
             ActionButton exit = ActionButton.builder(FoPauseMenuBootstrap.component(dialog.getString("exit-button.label", "{bad}Close"), tokens))
                     .tooltip(FoPauseMenuBootstrap.component(dialog.getString("exit-button.tooltip", "{white}Return to game."), tokens))
@@ -213,7 +235,8 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
                     tokens,
                     messages.getString("console.registry-disabled", "{prefix}Pause menu registry disabled in config."),
                     messages.getString("console.registry-registered", "{prefix}Registered native pause menu dialog."),
-                    actionPermission
+                    actionPermission,
+                    actionIds
             );
         }
 
@@ -221,13 +244,14 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
             return FoPauseMenuBootstrap.component(raw, tokens);
         }
 
-        private static List<ActionButton> loadButtons(YamlConfiguration config, YamlConfiguration dialog, Tokens tokens,
+        private static LoadedButtons loadButtons(YamlConfiguration config, YamlConfiguration dialog, Tokens tokens,
                                                       String actionPermission, int defaultWidth) {
             ConfigurationSection section = config.getConfigurationSection("actions");
             if (section == null) {
-                return new ArrayList<>();
+                return new LoadedButtons(List.of(), Set.of());
             }
             List<BootstrapButton> buttons = new ArrayList<>();
+            Set<String> actionIds = new LinkedHashSet<>();
             int sequence = 1;
             for (String rawId : section.getKeys(false)) {
                 String id = normalizeId(rawId);
@@ -253,10 +277,11 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
                 );
                 buttons.add(new BootstrapButton(config.getInt(path + "order", sequence),
                         actionButton(action, label, tooltip, width, tokens, actionPermission)));
+                actionIds.add(id);
                 sequence++;
             }
             buttons.sort(Comparator.comparingInt(BootstrapButton::order));
-            return buttons.stream().map(BootstrapButton::button).toList();
+            return new LoadedButtons(buttons.stream().map(BootstrapButton::button).toList(), Set.copyOf(actionIds));
         }
 
         private static ActionButton actionButton(BootstrapAction action, String label, String tooltip, int width,
@@ -265,11 +290,8 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
                     .tooltip(FoPauseMenuBootstrap.component(tooltip, tokens))
                     .width(width)
                     .action(DialogAction.customClick((response, audience) -> {
-                        if (action.type() == BootstrapActionType.NONE) {
-                            return;
-                        }
                         if (audience instanceof Player player) {
-                            closeScreenThenRun(player, () -> executeAction(player, action, tokens, actionPermission));
+                            handleActionClick(player, action, tokens, actionPermission);
                         }
                     }, CALLBACK_OPTIONS))
                     .build();
@@ -277,20 +299,57 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
 
         private static void executeAction(Player player, BootstrapAction action, Tokens tokens,
                                           String actionPermission) {
+            if (!player.isOnline()) {
+                return;
+            }
             if (!canUse(player, action, tokens, actionPermission)) {
                 return;
             }
-            Map<String, String> replacements = Map.of(
-                    "%player%", player.getName(),
-                    "%uuid%", player.getUniqueId().toString()
-            );
-            switch (action.type()) {
-                case PLAYER_COMMAND -> runPlayerCommand(player, action.command(), replacements);
-                case CONSOLE_COMMAND -> runConsoleCommand(action.command(), replacements);
-                case MESSAGE -> player.sendMessage(FoPauseMenuBootstrap.component(action.message(), tokens, replacements));
-                case NONE -> {
+            Plugin found = Bukkit.getPluginManager().getPlugin("FoPauseMenu");
+            if (!(found instanceof FoPauseMenu plugin) || !plugin.isEnabled()) {
+                return;
+            }
+            FoPauseMenu.CustomRegistration custom = plugin.customActionRegistration(action.id());
+            boolean configuredAction = hasConfiguredAction(action);
+            if (custom == null && !configuredAction) {
+                return;
+            }
+            PauseMenuActionType type = switch (action.type()) {
+                case PLAYER_COMMAND -> PauseMenuActionType.PLAYER_COMMAND;
+                case CONSOLE_COMMAND -> PauseMenuActionType.CONSOLE_COMMAND;
+                case MESSAGE -> PauseMenuActionType.MESSAGE;
+                case NONE -> PauseMenuActionType.NONE;
+            };
+            PauseMenuActionPreExecuteEvent event =
+                    new PauseMenuActionPreExecuteEvent(player, action.id(), type, custom != null);
+            Bukkit.getPluginManager().callEvent(event);
+            if (event.isCancelled()) {
+                return;
+            }
+            if (configuredAction && (custom == null || custom.mode() == CustomActionMode.AFTER_CONFIGURED)) {
+                Map<String, String> replacements = Map.of(
+                        "%player%", player.getName(),
+                        "%uuid%", player.getUniqueId().toString()
+                );
+                switch (action.type()) {
+                    case PLAYER_COMMAND -> runPlayerCommand(player, action.command(), replacements);
+                    case CONSOLE_COMMAND -> runConsoleCommand(action.command(), replacements);
+                    case MESSAGE -> player.sendMessage(FoPauseMenuBootstrap.component(action.message(), tokens, replacements));
+                    case NONE -> {
+                    }
                 }
             }
+            if (custom != null && player.isOnline() && plugin.customActionRegistration(action.id()) == custom) {
+                plugin.runCustomAction(action.id(), player, custom.handler());
+            }
+        }
+
+        private static boolean hasConfiguredAction(BootstrapAction action) {
+            return switch (action.type()) {
+                case PLAYER_COMMAND, CONSOLE_COMMAND -> !CommandDispatchUtil.stripSlash(action.command()).isBlank();
+                case MESSAGE -> !action.message().isBlank();
+                case NONE -> false;
+            };
         }
 
         private static boolean canUse(Player player, BootstrapAction action, Tokens tokens, String actionPermission) {
@@ -307,6 +366,30 @@ public final class FoPauseMenuBootstrap implements PluginBootstrap {
 
         private static void runConsoleCommand(String command, Map<String, String> replacements) {
             CommandDispatchUtil.dispatchConsoleCommand(replace(command, replacements));
+        }
+
+        private static void handleActionClick(Player player, BootstrapAction action, Tokens tokens,
+                                              String actionPermission) {
+            Plugin found = Bukkit.getPluginManager().getPlugin("FoPauseMenu");
+            if (!(found instanceof FoPauseMenu plugin) || !plugin.isEnabled()) {
+                return;
+            }
+            Runnable click = () -> {
+                if (!player.isOnline()) {
+                    return;
+                }
+                if (action.type() == BootstrapActionType.NONE && plugin.customActionRegistration(action.id()) == null) {
+                    return;
+                }
+                player.closeInventory();
+                Bukkit.getScheduler().runTaskLater(plugin,
+                        () -> executeAction(player, action, tokens, actionPermission), 1L);
+            };
+            if (Bukkit.isPrimaryThread()) {
+                click.run();
+            } else {
+                Bukkit.getScheduler().runTask(plugin, click);
+            }
         }
 
         private static void closeScreenThenRun(Player player, Runnable task) {
